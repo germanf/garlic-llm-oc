@@ -4,8 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Small, single-process durable queue for work owned by Garlic's main loop.
- * Version 1 intentionally serializes model work: one task may be RUNNING. */
+/* Durable, single-process queue. All calls must be serialized by its owner
+ * (the Garlic main loop); inference is deliberately never claimed in parallel. */
 #define TASK_QUEUE_CAPACITY 32
 #define TASK_PROMPT_MAX 2048
 #define TASK_RESULT_MAX 4096
@@ -17,7 +17,8 @@ typedef enum {
     TASK_RUNNING = 2,
     TASK_COMPLETED = 3,
     TASK_FAILED = 4,
-    TASK_CANCELED = 5
+    TASK_CANCELED = 5,
+    TASK_CANCEL_REQUESTED = 6
 } TaskState;
 
 typedef struct {
@@ -36,20 +37,26 @@ typedef struct {
     GarlicTask tasks[TASK_QUEUE_CAPACITY];
     size_t count;
     uint32_t next_id;
+    uint32_t journal_records;
     int ready;
 } TaskQueue;
 
-/* Load/replay the journal. A torn final record is discarded during recovery. */
+/* Replay journal. A torn tail is removed; interrupted RUNNING work is requeued
+ * at least once (or marked canceled if cancellation had been requested). */
 int task_queue_init(TaskQueue *q, const char *journal_path);
-/* Persist and enqueue. Returns 0 or -1; id_out receives task-XXXXXXXX on success. */
+/* Persist and enqueue. Returns 0 or -1; id_out receives task-XXXXXXXX. */
 int task_queue_add(TaskQueue *q, const char *prompt, char *id_out, size_t id_cap);
-/* Claim the oldest queued task, persisting RUNNING before returning it; 1=claimed, 0=empty, -1=I/O error. */
+/* Claim FIFO work. Persisted RUNNING before return; 1=claimed, 0=none/another
+ * active task, -1=I/O error. Exactly one task may be RUNNING. */
 int task_queue_claim(TaskQueue *q, GarlicTask *out);
-/* Transition a running task to a terminal state, persisted before memory is changed. */
+int task_queue_has_active(const TaskQueue *q);
+/* Terminal transitions are durable before becoming visible in memory. */
 int task_queue_complete(TaskQueue *q, uint32_t id, const char *result);
 int task_queue_fail(TaskQueue *q, uint32_t id, const char *error);
+/* Queued tasks cancel immediately; running tasks transition to
+ * CANCEL_REQUESTED for the scheduler to stop at a safe generation boundary. */
 int task_queue_cancel(TaskQueue *q, uint32_t id);
-/* Find by numeric ID (the suffix in task-XXXXXXXX). */
+int task_queue_finish_cancel(TaskQueue *q, uint32_t id);
 const GarlicTask *task_queue_get(const TaskQueue *q, uint32_t id);
 size_t task_queue_count_state(const TaskQueue *q, TaskState state);
 
