@@ -1,51 +1,52 @@
-# Web search bridge for Garlic LLM
+# DuckDuckGo web-search bridge for Garlic LLM
 
-Garlic's model runs locally on the PS4. This optional computer-side bridge uses Brave Search for current web results, then sends the question and bounded text excerpts to Garlic's existing OpenAI-compatible **LAN API** for a locally generated, source-linked answer. The Brave credential stays on the computer running the bridge; it is not embedded in the PKG, committed to Git, or sent to the console.
+This optional computer-side bridge uses DuckDuckGo's server-rendered HTML results and sends a small set of text excerpts to Garlic's existing OpenAI-compatible API on the PS4's local network. The language model stays on the console. DuckDuckGo search requires no API key or account for this basic use, but its HTML endpoint may change or rate-limit automated requests.
 
-This is deliberately a client-side bridge rather than an internet-facing server. It does not expose a new listening port, crawl arbitrary URLs, execute page code, or expose the PS4 API to the public internet. Search results are untrusted input and are labeled as such in the model prompt.
+The bridge is a command-line client, not an internet-facing server. It does not expose a new listening port, fetch arbitrary result pages, execute JavaScript, or make the PS4 browse the web. It uses Python's standard library only.
 
 ## Requirements
 
 - Garlic LLM with its OpenAI-compatible API (available in releases that include the API, version 1.20 or newer).
 - PS4 and computer on the same trusted local network.
-- A Brave Search API subscription/key.
-- Python 3; the bridge uses only the standard library.
+- Python 3.
+- Internet access on the computer running this bridge.
 
 ## Start the PS4 API
 
-Open Garlic on the PS4 and press **L3** on the chat screen. Note the address shown, such as `192.168.1.5:8080`. Confirm the computer can reach `http://192.168.1.5:8080/health`. If you configured `/data/garlic_api_key.txt`, also set `GARLIC_API_KEY` on the computer to the matching value.
+Open Garlic on the PS4 and press **L3** on the chat screen. Note the address shown, such as `192.168.1.5:8080`. From the computer, check `http://192.168.1.5:8080/health`. If `/data/garlic_api_key.txt` is configured on the console, set the same value in `GARLIC_API_KEY` on the computer.
 
-## Run a search
-
-Set credentials in your computer's environment (do not paste them into source files or commit them):
+## Search and ask Garlic
 
 ```sh
-export BRAVE_SEARCH_API_KEY='your-Brave-key'
 export GARLIC_API_URL='http://192.168.1.5:8080'
-# Only if Garlic's local API key is configured:
+# Only when Garlic's local API key is configured:
 export GARLIC_API_KEY='your-Garlic-API-key'
 python3 tools/garlic_web_search.py "¿Qué novedades hay sobre ...?"
 ```
 
-Windows PowerShell example:
+Windows PowerShell:
 
 ```powershell
-$env:BRAVE_SEARCH_API_KEY = 'your-Brave-key'
 $env:GARLIC_API_URL = 'http://192.168.1.5:8080'
+# Only when configured on the PS4:
+$env:GARLIC_API_KEY = 'your-Garlic-API-key'
 python tools/garlic_web_search.py "¿Qué novedades hay sobre ...?"
 ```
 
-Options: `--ps4 http://<PS4-IP>:8080`, `--count 1..10` (default 5), and `--timeout 1..60` seconds. The PS4 API has one model request at a time; the bridge waits for its response.
+Options: `--ps4 http://<PS4-IP>:8080`, `--count 1..10` (default 5), and `--timeout 1..60` seconds. There is no Brave credential or search API key to configure. The Garlic API handles one generation request at a time.
 
-## Data and security notes
+## Safety and limitations
 
-- Each search sends the question to Brave. The returned titles, URLs, and excerpts are sent over the local network to the PS4's Garlic API. Do not include private information in a search query.
-- Keep both API keys in environment variables or a local, untracked secrets manager. Never commit them. The Brave key is sent to Brave over HTTPS and is not forwarded to Garlic.
-- The PS4 API uses HTTP on the LAN. Use it only on a trusted network; retain Garlic's API-key option and do not forward port 8080 from your router to the internet.
-- The bridge contacts only Brave's fixed search endpoint; it does not fetch arbitrary result URLs. It caps the response at 2 MiB, limits result count and excerpt length, and applies request timeouts.
-- Brave Search may require a paid or otherwise eligible account; check the current terms and quotas for your account.
+- The question is sent to DuckDuckGo. Result titles, URLs, and bounded excerpts are sent to Garlic over the local network. Do not search for private information.
+- DuckDuckGo HTML is parsed as text only; scripts are never executed. The client follows no links from search results.
+- The bridge accepts only HTTP(S) result URLs, caps the downloaded response at 2 MiB, limits result count and excerpt size, and applies request timeouts.
+- Search excerpts are untrusted; the prompt tells the model not to follow instructions in them. This is a mitigation, not a guarantee against prompt injection.
+- DuckDuckGo may change the HTML, present a challenge, or throttle automated requests. In that case the bridge reports that no usable results were returned; avoid aggressive retries and follow the service's terms.
+- Garlic's API uses HTTP on the LAN. Use a trusted network, configure its API-key option if appropriate, and do not forward port 8080 from the router to the public internet.
 
-## Tests
+## Offline parser tests
+
+Tests use fixed HTML fixtures embedded in the test file and make no external requests:
 
 ```sh
 python -m unittest discover -s tests -p 'test_garlic_web_search.py'
